@@ -1,104 +1,143 @@
 import ambientColors from '../../data/hero-ambient.json'
 
 /**
- * Prepared frame sequence for the hero campaign animation.
+ * Prepared frame sequence for the hero campaign clip.
  *
- * The supplied asset is a 10 s / 24 fps clip (640×360). It is exported once to
- * a numbered JPEG sequence so the hero can address exact frames from scroll
- * progress — seeking a compressed H.264 file per scroll event stutters, while
- * drawing a pre-decoded image is cheap and reversible.
+ * The supplied asset is a 10 s / 24 fps H.264 clip (640×360). Seeking a
+ * compressed H.264 file on every scroll event stutters and drops frames, so the
+ * clip is exported once to a numbered JPEG sequence: the hero addresses an exact
+ * frame from scroll progress and drawing a decoded image is cheap in both
+ * directions. Assets live in `public/hero` and were generated from the clip with
+ * `ffmpeg -fps_mode passthrough -q:v 3`.
  */
 export const FRAME_COUNT = 240
 
 /** Frames are 1-based on disk: f001.jpg … f240.jpg */
 export const frameSrc = (index: number) => `/hero/f${String(index + 1).padStart(3, '0')}.jpg`
 
+/** First frame, shown immediately so the stage is never empty while loading. */
 export const POSTER_SRC = '/hero/poster.jpg'
 
-/** Dominant colour of the final frame — the paint that covers the site. */
-export const PAINT_COLOR = '#2CACB7'
+/**
+ * Dominant colour of the clip's final frame (measured mean of the last frame:
+ * rgb(42,169,180)). It is the shared token for the stage behind the media, the
+ * final hero overlay, the paint curtain and the first content section.
+ */
+export const PAINT_COLOR = '#2AA9B4'
 
-/** Average colour of every frame, used as the ambient field behind the video. */
+/** Colour of the clip's outer edge per frame, used to blend the media into the page. */
 export const AMBIENT_COLORS: string[] = ambientColors
 
-const MAX_CACHED_FRAMES = 150
+type Options = { concurrency?: number; limit?: number }
 
 /**
- * Bounded, progressive frame loader.
+ * Progressive, scroll-aware frame loader.
  *
- * Frames load on demand in the direction of travel; the cache drops the frames
- * furthest from the playhead so a long sequence never pins hundreds of decoded
- * bitmaps in memory on a phone.
+ * Frames are requested in the order the user is travelling (the playhead first,
+ * then ahead of it) and the whole sequence is filled in afterwards at a low
+ * concurrency, so a slow connection still gets a populated sequence without
+ * blocking the first paint. A bounded cache drops frames far from the playhead
+ * to keep mobile memory in check; the browser's HTTP cache keeps the bytes.
  */
-export class FrameStore {
-  private frames: Array<HTMLImageElement | undefined> = []
+export class FrameSequence {
+  private images: Array<HTMLImageElement | undefined> = []
   private pending = new Set<number>()
+  private queue: number[] = []
+  private active = 0
   private disposed = false
 
+  private readonly concurrency: number
+  private readonly limit: number
+
   /** Called whenever a requested frame finishes decoding. */
-  onFrameReady: ((index: number) => void) | null = null
+  onReady: ((index: number) => void) | null = null
+
+  constructor({ concurrency = 5, limit = 240 }: Options = {}) {
+    this.concurrency = concurrency
+    this.limit = limit
+  }
 
   get(index: number): HTMLImageElement | undefined {
-    return this.frames[index]
+    return this.images[index]
   }
 
-  request(index: number) {
+  get loadedCount() {
+    return this.images.reduce((total, image) => (image ? total + 1 : total), 0)
+  }
+
+  /** Queue one frame; `urgent` puts it at the front of the line. */
+  enqueue(index: number, urgent = false) {
     if (this.disposed || index < 0 || index >= FRAME_COUNT) return
-    if (this.frames[index] || this.pending.has(index)) return
-
-    this.pending.add(index)
-    const image = new Image()
-    image.decoding = 'async'
-    image.src = frameSrc(index)
-    image.onload = () => {
-      this.pending.delete(index)
-      if (this.disposed) return
-      this.frames[index] = image
-      this.onFrameReady?.(index)
-    }
-    image.onerror = () => {
-      this.pending.delete(index)
-    }
+    if (this.images[index] || this.pending.has(index) || this.queue.includes(index)) return
+    if (urgent) this.queue.unshift(index)
+    else this.queue.push(index)
+    this.pump()
   }
 
-  /** Queue the frames ahead of the playhead without flooding the network. */
-  prefetch(center: number, direction: 1 | -1, ahead = 16, concurrency = 5) {
-    let queued = 0
-    for (let step = 1; step <= ahead && queued < concurrency; step += 1) {
+  /** Queue the frames ahead of the playhead first, in travel order. */
+  prefetch(center: number, direction: 1 | -1, ahead = 24) {
+    if (this.disposed) return
+    const upcoming: number[] = []
+    for (let step = 1; step <= ahead; step += 1) {
       const index = center + step * direction
-      if (index < 0 || index >= FRAME_COUNT) continue
-      if (this.frames[index] || this.pending.has(index)) continue
-      this.request(index)
-      queued += 1
+      if (index < 0 || index >= FRAME_COUNT) break
+      if (this.images[index] || this.pending.has(index)) continue
+      upcoming.push(index)
     }
+    if (!upcoming.length) return
+    this.queue = [...upcoming, ...this.queue.filter((index) => !upcoming.includes(index))]
+    this.pump()
   }
 
-  /**
-   * Warm a coarse ladder of frames (plus the final one) so a fast scroll or a
-   * jump to the end still has a nearby frame to draw immediately.
-   */
-  warmKeyframes(step = 24) {
-    for (let index = 0; index < FRAME_COUNT; index += step) this.request(index)
-    this.request(FRAME_COUNT - 1)
+  /** Fill in every frame that is still missing, without competing with the playhead. */
+  fill() {
+    for (let index = 0; index < FRAME_COUNT; index += 1) this.enqueue(index)
   }
 
-  /** Release frames far away from the playhead. */
-  trim(center: number, limit = MAX_CACHED_FRAMES) {
+  /** Release frames furthest from the playhead once the cache budget is exceeded. */
+  trim(center: number) {
+    if (this.loadedCount <= this.limit) return
     const loaded: number[] = []
-    for (let i = 0; i < FRAME_COUNT; i += 1) {
-      if (this.frames[i]) loaded.push(i)
+    for (let index = 0; index < FRAME_COUNT; index += 1) {
+      if (this.images[index]) loaded.push(index)
     }
-    if (loaded.length <= limit) return
-
     loaded.sort((a, b) => Math.abs(b - center) - Math.abs(a - center))
-    const excess = loaded.length - limit
-    for (let i = 0; i < excess; i += 1) this.frames[loaded[i]] = undefined
+    const excess = loaded.length - this.limit
+    for (let index = 0; index < excess; index += 1) this.images[loaded[index]] = undefined
+  }
+
+  private pump() {
+    while (this.active < this.concurrency && this.queue.length) {
+      const index = this.queue.shift() as number
+      if (this.images[index] || this.pending.has(index)) continue
+
+      this.active += 1
+      this.pending.add(index)
+
+      const image = new Image()
+      image.decoding = 'async'
+      image.onload = () => {
+        this.active -= 1
+        this.pending.delete(index)
+        if (this.disposed) return
+        this.images[index] = image
+        this.onReady?.(index)
+        this.pump()
+      }
+      image.onerror = () => {
+        this.active -= 1
+        this.pending.delete(index)
+        this.pump()
+      }
+      image.src = frameSrc(index)
+    }
   }
 
   dispose() {
     this.disposed = true
-    this.onFrameReady = null
-    this.frames = []
+    this.onReady = null
+    this.images = []
     this.pending.clear()
+    this.queue = []
   }
 }

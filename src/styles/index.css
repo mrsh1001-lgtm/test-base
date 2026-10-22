@@ -16,7 +16,7 @@
     /* Dominant colour of the hero clip's final frame — the paint that covers
        the site and opens the first content section. Shared by the hero stage,
        the paint curtain and the section beneath it. */
-    --paint: #2cacb7;
+    --paint: #2aa9b4;
   }
 
   html {
