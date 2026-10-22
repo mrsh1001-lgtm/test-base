@@ -3,85 +3,91 @@ import { useReducedMotion } from '../../lib/useReducedMotion'
 import { PAINT_COLOR } from './heroSequence'
 
 /** Scroll the paint needs to drain out of the viewport, as a share of the screen height. */
-const DRAIN_DESKTOP = 0.85
-const DRAIN_MOBILE = 0.6
+const DRAIN_DESKTOP = 0.9
+const DRAIN_MOBILE = 0.72
 
-const BOUNDARY_XS = [0, 14, 32, 50, 68, 86, 100]
-
-/** Paint streaks that cling above the draining edge. */
+/** Drips clinging above the receding edge: x as a share of the width, r of the height. */
 const DRIPS = [
-  { x: 12, radius: 2.6, length: 5.4 },
-  { x: 38, radius: 3.4, length: 8.2 },
-  { x: 64, radius: 2.9, length: 6.2 },
-  { x: 89, radius: 2.2, length: 4.4 },
+  { x: 0.13, r: 0.022 },
+  { x: 0.31, r: 0.034 },
+  { x: 0.51, r: 0.018 },
+  { x: 0.71, r: 0.028 },
+  { x: 0.9, r: 0.016 },
 ]
+
+/** Samples along the width for the liquid edge. */
+const SAMPLES = 40
 
 const clamp01 = (value: number) => (value < 0 ? 0 : value > 1 ? 1 : value)
 
-const smoothstep = (from: number, to: number, value: number) => {
-  const t = clamp01((value - from) / (to - from))
-  return t * t * (3 - 2 * t)
-}
-
-const ellipsePath = (cx: number, cy: number, rx: number, ry: number) =>
-  `M${(cx - rx).toFixed(2)} ${cy.toFixed(2)}a${rx.toFixed(2)} ${ry.toFixed(2)} 0 1 0 ${(
+const circle = (cx: number, cy: number, rx: number, ry: number) =>
+  `M${(cx - rx).toFixed(1)} ${cy.toFixed(1)}a${rx.toFixed(1)} ${ry.toFixed(1)} 0 1 0 ${(
     rx * 2
-  ).toFixed(2)} 0a${rx.toFixed(2)} ${ry.toFixed(2)} 0 1 0 ${(-rx * 2).toFixed(2)} 0Z`
+  ).toFixed(1)} 0a${rx.toFixed(1)} ${ry.toFixed(1)} 0 1 0 ${(-rx * 2).toFixed(1)} 0Z`
+
+/** Height of the liquid edge (the top of the remaining paint) at a share `t` of the width. */
+const edgeAt = (t: number, base: number, amplitude: number) =>
+  base +
+  amplitude *
+    (Math.sin(t * 8.6 + 0.7) * 0.55 + Math.sin(t * 15.1 + 2.4) * 0.3 + Math.sin(t * 4.3 + 4.1) * 0.15)
 
 /**
- * The paint curtain: the coloured layer whose lower edge is an organic, curved
- * boundary. Progress 0 covers the viewport completely; progress 1 has drained
- * entirely below it. The path lives in a 0–100 box stretched to the viewport, so
- * the curve stays soft at every aspect ratio.
+ * The paint mass. Its top edge is the organic boundary that travels downward —
+ * progress 0 puts it above the viewport (paint everywhere), progress 1 below it
+ * (paint gone) — and it stays filled to well past the bottom of the stage, so
+ * the clearing always starts at the top and moves down.
  */
-function curtainPath(progress: number) {
-  const top = -14 + 128 * progress
-  const wave = 4.4 * Math.sin(Math.PI * clamp01(progress * 1.06)) * (1 - smoothstep(0.88, 1, progress))
-  const points = BOUNDARY_XS.map((x, index) => ({
-    x,
-    y: top + Math.sin(index * 1.9 + 0.6) * wave,
-  }))
+function paintShape(width: number, height: number, progress: number) {
+  const pad = Math.max(140, height * 0.26)
+  const base = -pad + (height + pad * 2) * progress
+  const amplitude = Math.min(26, height * 0.04) * Math.sin(Math.PI * clamp01(progress))
 
-  let region = `M${points[0].x} ${points[0].y.toFixed(2)}`
-  for (let index = 1; index < points.length; index += 1) {
-    const mid = (points[index - 1].x + points[index].x) / 2
-    region += ` C${mid.toFixed(2)} ${points[index - 1].y.toFixed(2)}, ${mid.toFixed(2)} ${points[
-      index
-    ].y.toFixed(2)}, ${points[index].x} ${points[index].y.toFixed(2)}`
+  let mass = `M0 ${edgeAt(0, base, amplitude).toFixed(1)}`
+  for (let index = 1; index <= SAMPLES; index += 1) {
+    const t0 = (index - 1) / SAMPLES
+    const t1 = index / SAMPLES
+    const mid = ((t0 + t1) / 2) * width
+    mass += ` C${mid.toFixed(1)} ${edgeAt(t0, base, amplitude).toFixed(1)}, ${mid.toFixed(
+      1,
+    )} ${edgeAt(t1, base, amplitude).toFixed(1)}, ${(t1 * width).toFixed(1)} ${edgeAt(
+      t1,
+      base,
+      amplitude,
+    ).toFixed(1)}`
   }
-  region += ' L100 118 L0 118 Z'
+  mass += ` L${width} ${height + 200} L0 ${height + 200} Z`
 
-  // Drips live in their own white shape so they always add paint to the mask
-  // instead of punching a hole through it.
+  // Rounded drips: a bulb that overlaps the edge plus a neck that melts into
+  // the mass, so each one reads as paint clinging to the wall as it runs down.
   let drips = ''
-  const dripScale = Math.min(1, progress * 4) * (1 - smoothstep(0.84, 1, progress))
-  for (let index = 0; index < DRIPS.length; index += 1) {
-    const drip = DRIPS[index]
-    const height = drip.length * dripScale
-    if (height < 0.4) continue
-    const edge = top + Math.sin(index * 1.7 + 1.2) * wave
-    // Overlap the edge slightly so each drip reads as paint clinging to the
-    // wall rather than a shape floating above it.
-    drips += ellipsePath(drip.x, edge - height * 0.38, drip.radius * dripScale, height * 0.62)
+  for (const drip of DRIPS) {
+    const radius = Math.max(9, height * drip.r)
+    const cx = drip.x * width
+    const cy = edgeAt(drip.x, base, amplitude) - radius * 0.35
+    drips += circle(cx, cy, radius, radius * 1.12)
+    drips += circle(cx, cy + radius * 0.95, radius * 0.42, radius * 0.85)
   }
 
-  return { region, drips }
+  return { mass, drips }
 }
 
 /**
- * Hands the hero's final paint colour to the next section, then drains it away.
+ * Hands the hero's final paint colour to the next section, then drains it.
  *
- * The wrapper overlaps the last viewport-height of the hero, so the paint covers
- * the screen at the exact frame the hero sequence ends. The section underneath
- * is pinned while the boundary travels down, giving a clean scroll-linked,
- * reversible reveal before the page returns to its normal flow.
+ * The wrapper starts exactly where the hero stage releases and adds one drain of
+ * scroll, so the turquoise covers the screen at the moment the clip's paint frame
+ * leaves it. The next section is pinned underneath, on the site's own
+ * warm-white, while the paint's top edge runs downward: the top of the section
+ * is uncovered first and the bottom last. Past the viewport the curtain is
+ * removed and normal scrolling resumes; scrolling back up reverses all of it.
  */
 export function PaintDrain({ children }: { children: ReactNode }) {
   const reduced = useReducedMotion()
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const stageRef = useRef<HTMLDivElement | null>(null)
-  const contentRef = useRef<HTMLDivElement | null>(null)
-  const pathRef = useRef<SVGPathElement | null>(null)
+  const curtainRef = useRef<HTMLDivElement | null>(null)
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  const massRef = useRef<SVGPathElement | null>(null)
   const dripRef = useRef<SVGPathElement | null>(null)
 
   useLayoutEffect(() => {
@@ -89,21 +95,23 @@ export function PaintDrain({ children }: { children: ReactNode }) {
 
     const wrap = wrapRef.current
     const stage = stageRef.current
-    const content = contentRef.current
-    const path = pathRef.current
+    const curtain = curtainRef.current
+    const svg = svgRef.current
+    const mass = massRef.current
     const drips = dripRef.current
-    if (!wrap || !stage || !content || !path || !drips) return
+    if (!wrap || !stage || !curtain || !svg || !mass || !drips) return
 
     let drain = 0
+    let width = 0
+    let height = 0
     let raf = 0
 
     const render = (progress: number) => {
-      const shape = curtainPath(progress)
-      path.setAttribute('d', shape.region)
+      const shape = paintShape(width, height, progress)
+      mass.setAttribute('d', shape.mass)
       drips.setAttribute('d', shape.drips)
-      const enter = smoothstep(0.42, 0.98, progress)
-      content.style.opacity = (0.38 + 0.62 * enter).toFixed(3)
-      content.style.transform = `translate3d(0, ${((1 - enter) * 22).toFixed(2)}px, 0)`
+      // Below the viewport the paint is gone: stop compositing it at all.
+      curtain.style.visibility = progress > 0.995 ? 'hidden' : 'visible'
     }
 
     const update = () => {
@@ -118,10 +126,12 @@ export function PaintDrain({ children }: { children: ReactNode }) {
 
     const measure = () => {
       const viewport = window.innerHeight || 1
-      drain = viewport * (window.innerWidth >= 1024 ? DRAIN_DESKTOP : DRAIN_MOBILE)
-      // The wrapper starts exactly where the hero stage releases, so the curtain
-      // only reaches the screen once the clip's final paint frame is on it.
+      drain = Math.round(viewport * (window.innerWidth >= 1024 ? DRAIN_DESKTOP : DRAIN_MOBILE))
+      // The wrapper holds the pinned section plus exactly one drain of scroll.
       wrap.style.height = `${stage.offsetHeight + drain}px`
+      width = curtain.offsetWidth || window.innerWidth
+      height = curtain.offsetHeight || viewport
+      svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
       update()
     }
 
@@ -143,23 +153,21 @@ export function PaintDrain({ children }: { children: ReactNode }) {
 
   return (
     <div ref={wrapRef} data-paint-drain className="relative">
-      <div ref={stageRef} className="sticky top-0 flex min-h-[100dvh] items-center">
-        <div ref={contentRef} className="w-full will-change-[opacity,transform]">
-          {children}
-        </div>
+      {/* The real section, pinned underneath the paint on the site background. */}
+      <div
+        ref={stageRef}
+        data-paint-stage
+        className="sticky top-0 flex min-h-[100dvh] items-center bg-cream"
+      >
+        <div className="w-full">{children}</div>
       </div>
 
+      {/* Paint curtain: a sticky viewport-height layer above the section. */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-30">
-        <div data-paint-curtain className="sticky top-0 h-[100dvh] overflow-hidden">
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="block h-full w-full">
-            <defs>
-              <mask id="paint-drain-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
-                <rect x="0" y="0" width="100" height="100" fill="black" />
-                <path ref={pathRef} fill="white" />
-                <path ref={dripRef} fill="white" />
-              </mask>
-            </defs>
-            <rect x="0" y="0" width="100" height="100" fill={PAINT_COLOR} mask="url(#paint-drain-mask)" />
+        <div ref={curtainRef} data-paint-curtain className="sticky top-0 h-[100dvh] overflow-hidden">
+          <svg ref={svgRef} className="block h-full w-full">
+            <path ref={massRef} fill={PAINT_COLOR} />
+            <path ref={dripRef} fill={PAINT_COLOR} />
           </svg>
         </div>
       </div>
