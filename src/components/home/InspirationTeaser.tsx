@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { ArrowLeft } from '../Icons'
-import { paletteBySlug, projects } from '../../data/projects'
-import { shadeBySlug } from '../../data/catalog'
+import { projects } from '../../data/projects'
+import { paletteBySlug, shadeBySlug } from '../../data/catalog'
 import { Section } from '../ui/Section'
 
 export function InspirationTeaser() {

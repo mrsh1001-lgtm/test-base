@@ -13,6 +13,10 @@
 @layer base {
   :root {
     color-scheme: light;
+    /* Dominant colour of the hero clip's final frame — the paint that covers
+       the site and opens the first content section. Shared by the hero stage,
+       the paint curtain and the section beneath it. */
+    --paint: #2cacb7;
   }
 
   html {
@@ -144,6 +148,18 @@
   .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;
+  }
+}
+
+/* Scroll-driven hero: how far the pinned stage travels. A phone gets a shorter
+   distance so the whole sequence stays comfortable to explore. */
+[data-hero-track] {
+  height: 300svh;
+}
+
+@media (min-width: 1024px) {
+  [data-hero-track] {
+    height: 430svh;
   }
 }
 

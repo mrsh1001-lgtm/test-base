@@ -5,6 +5,8 @@ export default {
     extend: {
       colors: {
         cream: '#FFFCF7',
+        // Dominant colour of the hero clip's final frame (paint that covers the site).
+        paint: '#2CACB7',
         'cream-deep': '#FBF4E9',
         sand: '#F3E9DA',
         plum: {

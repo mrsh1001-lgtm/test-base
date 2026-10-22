@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
-import { ArrowLeft, ChevronDown, Close, Menu, Sparkle } from '../components/Icons'
-import { BrandLogo } from '../components/BrandLogo'
-import { categories, products } from '../data/catalog'
-import { cn } from '../lib/utils'
+import { ArrowLeft, ChevronDown, Close, Menu, Sparkle } from '../Icons'
+import { BrandLogo } from '../BrandLogo'
+import { categories, products } from '../../data/catalog'
+import { cn } from '../../lib/utils'
 
 const navItems = [
   { label: 'محصولات', to: '/products', mega: true },
@@ -18,7 +18,7 @@ export function Header() {
   const [megaOpen, setMegaOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mobileProductsOpen, setMobileProductsOpen] = useState(false)
-  const megaWrapRef = useRef<HTMLDivElement>(null)
+  const megaWrapRef = useRef<HTMLLIElement>(null)
   const location = useLocation()
 
   useEffect(() => {

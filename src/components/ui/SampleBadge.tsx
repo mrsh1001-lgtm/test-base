@@ -1,4 +1,4 @@
-import { cn } from '../lib/utils'
+import { cn } from '../../lib/utils'
 
 /**
  * Marks content that is not real manufacturer data yet. Used on sample records

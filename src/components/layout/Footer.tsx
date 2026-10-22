@@ -1,10 +1,10 @@
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Download, Mail, MapPin, Phone } from '../components/Icons'
-import { BrandLogo } from '../components/BrandLogo'
-import { brand } from '../data/brand'
-import { categories } from '../data/catalog'
-import { downloads } from '../data/dealers'
-import { faNum } from '../lib/utils'
+import { ArrowLeft, Download, Mail, MapPin, Phone } from '../Icons'
+import { BrandLogo } from '../BrandLogo'
+import { brand } from '../../data/brand'
+import { categories } from '../../data/catalog'
+import { downloads } from '../../data/dealers'
+import { faNum } from '../../lib/utils'
 
 const columns = [
   {
