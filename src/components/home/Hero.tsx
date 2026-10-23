@@ -5,7 +5,7 @@ import { HeroSwatches } from './HeroSwatches'
 import { brand, heroCopy } from '../../data/brand'
 import { useReducedMotion } from '../../lib/useReducedMotion'
 import { FRAME_COUNT, FrameSequence, PAINT_COLOR, POSTER_SRC } from './heroSequence'
-import { paintEdge } from './paintEdge'
+import { paintMaskHeight, paintTravel } from './paintMask'
 import { revealDistance } from './reveal'
 
 /** Copy is gone by this share of the hero scroll and comes back on the way up. */
@@ -140,9 +140,6 @@ export function Hero() {
   const copyRef = useRef<HTMLDivElement | null>(null)
   const veilRef = useRef<HTMLDivElement | null>(null)
   const curtainRef = useRef<HTMLDivElement | null>(null)
-  const svgRef = useRef<SVGSVGElement | null>(null)
-  const massRef = useRef<SVGPathElement | null>(null)
-  const dripRef = useRef<SVGPathElement | null>(null)
 
   useLayoutEffect(() => {
     if (reduced) return
@@ -155,10 +152,7 @@ export function Hero() {
     const poster = posterRef.current
     const veil = veilRef.current
     const curtain = curtainRef.current
-    const svg = svgRef.current
-    const mass = massRef.current
-    const drips = dripRef.current
-    if (!track || !stage || !media || !canvas || !copy || !veil || !curtain || !svg || !mass || !drips) return
+    if (!track || !stage || !media || !canvas || !copy || !veil || !curtain) return
 
     const context = canvas.getContext('2d')
     if (!context) return
@@ -235,9 +229,11 @@ export function Hero() {
       const { width, height } = size
       if (!width || !height) return
 
-      const shape = paintEdge(width, height, value)
-      mass.setAttribute('d', shape.mass)
-      drips.setAttribute('d', shape.drips)
+      // The artwork is the mask, so the whole layer travels: at 0 the solid part
+      // of the mask covers the stage with the dripping edge just below the fold,
+      // and at 1 the drip tips have cleared the top of the screen.
+      const travel = paintTravel(width, height)
+      curtain.style.transform = `translate3d(0, ${(-value * travel).toFixed(2)}px, 0)`
 
       // Once the paint takes over, the stage is only a window onto the section
       // below: it must not catch clicks meant for that section.
@@ -249,7 +245,7 @@ export function Hero() {
         track.style.pointerEvents = covering ? 'none' : ''
       }
 
-      curtain.style.visibility = value > 0 && value < 0.999 ? 'visible' : 'hidden'
+      curtain.style.visibility = covering ? 'visible' : 'hidden'
     }
 
     const measure = () => {
@@ -263,7 +259,13 @@ export function Hero() {
       canvas.width = Math.max(1, Math.round(width * dpr))
       canvas.height = Math.max(1, Math.round(height * dpr))
       context.setTransform(dpr, 0, 0, dpr, 0, 0)
-      svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
+
+      // The mask is drawn across the full width of a band taller than the stage
+      // by the artwork's own height: the band above it is solid paint, and the
+      // artwork hangs from its bottom edge.
+      const mask = paintMaskHeight(width)
+      curtain.style.height = `${height + mask}px`
+      curtain.style.setProperty('--paint-mask', `${mask}px`)
 
       paintMedia(progress)
       paintReveal(reveal)
@@ -385,14 +387,11 @@ export function Hero() {
           <HeroOverlay />
         </div>
 
-        {/* Paint mass attached to the top with a dripping lower edge; it is the
-            same layer the section below is uncovered through. */}
-        <div ref={curtainRef} aria-hidden="true" data-hero-curtain className="pointer-events-none absolute inset-0 z-30">
-          <svg ref={svgRef} className="block h-full w-full">
-            <path ref={massRef} fill={PAINT_COLOR} />
-            <path ref={dripRef} fill={PAINT_COLOR} />
-          </svg>
-        </div>
+        {/* The paint: one flat fill of the paint token, shaped only by the drip
+            artwork's alpha channel. Its transparent half lets the section below
+            show through, and it never takes pointer events, so the content it
+            uncovers stays fully usable. */}
+        <div ref={curtainRef} aria-hidden="true" data-hero-curtain className="paint-curtain pointer-events-none absolute inset-x-0 top-0 z-30" />
       </div>
     </section>
   )
