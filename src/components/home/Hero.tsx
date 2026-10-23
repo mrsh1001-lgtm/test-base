@@ -4,13 +4,13 @@ import { ArrowLeft } from '../Icons'
 import { HeroSwatches } from './HeroSwatches'
 import { brand, heroCopy } from '../../data/brand'
 import { useReducedMotion } from '../../lib/useReducedMotion'
-import { FRAME_COUNT, FrameSequence, PAINT_COLOR, POSTER_SRC } from './heroSequence'
-import { paintMaskHeight, paintTravel } from './paintMask'
+import { FRAME_COUNT, FrameSequence, POSTER_SRC } from './heroSequence'
+import { PAINT_ART_SRC, PAINT_EDGE_COLOR, paintTravel } from './paintArt'
 import { revealDistance } from './reveal'
 
 /** Copy is gone by this share of the hero scroll and comes back on the way up. */
 const COPY_FADE_END = 0.14
-/** The clip ends in solid paint; the veil seals the seam into the paint token as it ends. */
+/** The clip ends in solid paint; the veil seals the seam into the artwork's turquoise. */
 const VEIL_START = 0.86
 const VEIL_END = 0.99
 
@@ -140,6 +140,7 @@ export function Hero() {
   const copyRef = useRef<HTMLDivElement | null>(null)
   const veilRef = useRef<HTMLDivElement | null>(null)
   const curtainRef = useRef<HTMLDivElement | null>(null)
+  const plateRef = useRef<HTMLDivElement | null>(null)
 
   useLayoutEffect(() => {
     if (reduced) return
@@ -152,7 +153,8 @@ export function Hero() {
     const poster = posterRef.current
     const veil = veilRef.current
     const curtain = curtainRef.current
-    if (!track || !stage || !media || !canvas || !copy || !veil || !curtain) return
+    const plate = plateRef.current
+    if (!track || !stage || !media || !canvas || !copy || !veil || !curtain || !plate) return
 
     const context = canvas.getContext('2d')
     if (!context) return
@@ -229,9 +231,9 @@ export function Hero() {
       const { width, height } = size
       if (!width || !height) return
 
-      // The artwork is the mask, so the whole layer travels: at 0 the solid part
-      // of the mask covers the stage with the dripping edge just below the fold,
-      // and at 1 the drip tips have cleared the top of the screen.
+      // One layer travels as a whole: at 0 the plate covers the stage with the
+      // artwork's dripping edge just below the fold, and at 1 the drip tips have
+      // cleared the top of the screen.
       const travel = paintTravel(width, height)
       curtain.style.transform = `translate3d(0, ${(-value * travel).toFixed(2)}px, 0)`
 
@@ -260,12 +262,10 @@ export function Hero() {
       canvas.height = Math.max(1, Math.round(height * dpr))
       context.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-      // The mask is drawn across the full width of a band taller than the stage
-      // by the artwork's own height: the band above it is solid paint, and the
-      // artwork hangs from its bottom edge.
-      const mask = paintMaskHeight(width)
-      curtain.style.height = `${height + mask}px`
-      curtain.style.setProperty('--paint-mask', `${mask}px`)
+      // The plate is the solid turquoise the artwork hangs from: it fills the
+      // stage exactly, so the image's straight top edge lands on its bottom edge
+      // with no gap, and the drips stay below the fold until the reveal starts.
+      plate.style.height = `${height}px`
 
       paintMedia(progress)
       paintReveal(reveal)
@@ -373,13 +373,14 @@ export function Hero() {
             className="absolute inset-0 block h-full w-full object-cover object-center transition-opacity duration-300"
           />
 
-          {/* Seals the hand-off between the clip's final paint frame and the paint mass. */}
+          {/* Seals the hand-off between the clip's final frame and the paint
+              artwork, so the curtain appears without a colour jump. */}
           <div
             ref={veilRef}
             aria-hidden="true"
             data-hero-veil
             className="pointer-events-none absolute inset-0 opacity-0"
-            style={{ backgroundColor: PAINT_COLOR }}
+            style={{ backgroundColor: PAINT_EDGE_COLOR }}
           />
         </div>
 
@@ -387,11 +388,27 @@ export function Hero() {
           <HeroOverlay />
         </div>
 
-        {/* The paint: one flat fill of the paint token, shaped only by the drip
-            artwork's alpha channel. Its transparent half lets the section below
-            show through, and it never takes pointer events, so the content it
+        {/* The paint: a solid plate in the artwork's own turquoise with the 3D
+            artwork drawn over its lower edge as a plain image, full colour and
+            untouched. The artwork's transparent areas let the section below show
+            through, and the layer never takes pointer events, so the content it
             uncovers stays fully usable. */}
-        <div ref={curtainRef} aria-hidden="true" data-hero-curtain className="paint-curtain pointer-events-none absolute inset-x-0 top-0 z-30" />
+        <div
+          ref={curtainRef}
+          aria-hidden="true"
+          data-hero-curtain
+          className="pointer-events-none absolute inset-x-0 top-0 z-30 will-change-transform"
+        >
+          <div ref={plateRef} data-hero-paint-plate style={{ backgroundColor: PAINT_EDGE_COLOR }} />
+          <img
+            src={PAINT_ART_SRC}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+            data-hero-paint-art
+            className="block h-auto w-full select-none"
+          />
+        </div>
       </div>
     </section>
   )

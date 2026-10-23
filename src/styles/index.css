@@ -151,32 +151,6 @@
   }
 }
 
-/* Paint curtain of the hero hand-off.
-
-   The supplied drip artwork is the mask itself — the paint is one flat fill of
-   the paint token showing only where the artwork is opaque, so the dripping edge
-   is exactly the asset's own shape, full-width and proportional at every size.
-   The artwork's transparent lower half stays transparent: the section beneath it
-   is really underneath, with nothing painted behind it.
-
-   The mask has two layers: a solid band that extends the turquoise upward over
-   the viewport while the drips are still below the fold, and the artwork itself
-   pinned to the bottom of the band. `--paint-mask` is the artwork's rendered
-   height, set by the hero from the stage width. */
-.paint-curtain {
-  height: 0;
-  background-color: var(--paint);
-  will-change: transform;
-  -webkit-mask-image: linear-gradient(#000, #000), url('/img/paint-drip.png');
-  mask-image: linear-gradient(#000, #000), url('/img/paint-drip.png');
-  -webkit-mask-repeat: no-repeat, no-repeat;
-  mask-repeat: no-repeat, no-repeat;
-  -webkit-mask-position: 0 0, 0 100%;
-  mask-position: 0 0, 0 100%;
-  -webkit-mask-size: 100% calc(100% - var(--paint-mask, 0px) + 2px), 100% auto;
-  mask-size: 100% calc(100% - var(--paint-mask, 0px) + 2px), 100% auto;
-}
-
 /* Scroll-driven hero: how far the pinned stage travels. A phone gets a shorter
    distance so the whole sequence stays comfortable to explore. */
 [data-hero-track] {
