@@ -1,5 +1,5 @@
 import { Hero } from '../components/home/Hero'
-import { PaintDrain } from '../components/home/PaintDrain'
+import { PaintReveal } from '../components/home/PaintReveal'
 import { CategoryCards } from '../components/home/CategoryCards'
 import { ColorStudio } from '../components/colorStudio/ColorStudio'
 import { FeaturedProducts } from '../components/home/FeaturedProducts'
@@ -22,9 +22,9 @@ export function Home() {
   return (
     <>
       <Hero />
-      <PaintDrain>
+      <PaintReveal>
         <CategoryCards />
-      </PaintDrain>
+      </PaintReveal>
 
       <Section
         id="color-studio"

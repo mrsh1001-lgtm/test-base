@@ -5,12 +5,14 @@ import { HeroSwatches } from './HeroSwatches'
 import { brand, heroCopy } from '../../data/brand'
 import { useReducedMotion } from '../../lib/useReducedMotion'
 import { FRAME_COUNT, FrameSequence, PAINT_COLOR, POSTER_SRC } from './heroSequence'
+import { paintEdge } from './paintEdge'
+import { revealDistance } from './reveal'
 
 /** Copy is gone by this share of the hero scroll and comes back on the way up. */
 const COPY_FADE_END = 0.14
-/** The clip ends in solid paint; the veil seals it into the shared paint token. */
-const VEIL_START = 0.8
-const VEIL_END = 0.94
+/** The clip ends in solid paint; the veil seals the seam into the paint token as it ends. */
+const VEIL_START = 0.86
+const VEIL_END = 0.99
 
 type Size = { width: number; height: number; dpr: number }
 
@@ -119,31 +121,44 @@ function HeroOverlay() {
 }
 
 /**
- * Cinematic full-bleed hero. The image and the clip share one absolute media
- * layer that covers the whole sticky stage edge to edge; the copy sits above it
- * on its own. The clip advances only with scroll — down runs it forward, up runs
- * it back, stopping holds the frame — and its final paint frame hands the screen
- * to the shared paint token, which the next section drains away.
+ * Cinematic full-bleed hero and its paint hand-off.
+ *
+ * One sticky stage owns the whole timeline: the clip advances only with scroll
+ * (never on its own), and the scroll range that is left after the clip finishes
+ * is the reveal — from the moment the clip reaches full paint, a paint mass
+ * anchored to the top of the screen carries its dripping edge upward until it
+ * leaves through the top, uncovering the section underneath (rendered by
+ * `PaintReveal`, which sits below this stage and pins for the same distance).
  */
 export function Hero() {
   const reduced = useReducedMotion()
   const trackRef = useRef<HTMLElement | null>(null)
   const stageRef = useRef<HTMLDivElement | null>(null)
+  const mediaRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const posterRef = useRef<HTMLImageElement | null>(null)
   const copyRef = useRef<HTMLDivElement | null>(null)
   const veilRef = useRef<HTMLDivElement | null>(null)
+  const curtainRef = useRef<HTMLDivElement | null>(null)
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  const massRef = useRef<SVGPathElement | null>(null)
+  const dripRef = useRef<SVGPathElement | null>(null)
 
   useLayoutEffect(() => {
     if (reduced) return
 
     const track = trackRef.current
     const stage = stageRef.current
+    const media = mediaRef.current
     const canvas = canvasRef.current
     const copy = copyRef.current
     const poster = posterRef.current
     const veil = veilRef.current
-    if (!track || !stage || !canvas || !copy || !veil) return
+    const curtain = curtainRef.current
+    const svg = svgRef.current
+    const mass = massRef.current
+    const drips = dripRef.current
+    if (!track || !stage || !media || !canvas || !copy || !veil || !curtain || !svg || !mass || !drips) return
 
     const context = canvas.getContext('2d')
     if (!context) return
@@ -159,10 +174,12 @@ export function Hero() {
     let copyHidden = false
     let bufferedFrame = -1
     let started = false
+    let painted = false
     let raf = 0
+    let reveal = 0
     let size: Size = { width: 0, height: 0, dpr: 1 }
 
-    const paint = (value: number) => {
+    const paintMedia = (value: number) => {
       const { width, height } = size
       if (!width || !height) return
 
@@ -209,6 +226,32 @@ export function Hero() {
       veil.style.opacity = smoothstep(VEIL_START, VEIL_END, value).toFixed(3)
     }
 
+    /**
+     * The paint reveal shares the hero's timeline: as soon as the clip is solid
+     * paint, the media steps aside (the curtain covers exactly the same screen)
+     * and the paint edge travels upward until it leaves through the top.
+     */
+    const paintReveal = (value: number) => {
+      const { width, height } = size
+      if (!width || !height) return
+
+      const shape = paintEdge(width, height, value)
+      mass.setAttribute('d', shape.mass)
+      drips.setAttribute('d', shape.drips)
+
+      // Once the paint takes over, the stage is only a window onto the section
+      // below: it must not catch clicks meant for that section.
+      const covering = value > 0
+      if (covering !== painted) {
+        painted = covering
+        media.style.opacity = covering ? '0' : '1'
+        media.inert = covering
+        track.style.pointerEvents = covering ? 'none' : ''
+      }
+
+      curtain.style.visibility = value > 0 && value < 0.999 ? 'visible' : 'hidden'
+    }
+
     const measure = () => {
       const rect = stage.getBoundingClientRect()
       const width = rect.width || window.innerWidth
@@ -220,28 +263,38 @@ export function Hero() {
       canvas.width = Math.max(1, Math.round(width * dpr))
       canvas.height = Math.max(1, Math.round(height * dpr))
       context.setTransform(dpr, 0, 0, dpr, 0, 0)
+      svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
 
-      paint(progress)
+      paintMedia(progress)
+      paintReveal(reveal)
     }
 
     const tick = () => {
       raf = 0
       const rect = track.getBoundingClientRect()
       const stageHeight = stage.getBoundingClientRect().height
-      const range = rect.height - stageHeight
-      const target = range > 0 ? clamp01(-rect.top / range) : 0
+      const span = revealDistance()
+      // The clip finishes one reveal distance before the stage releases; every
+      // pixel after that belongs to the paint reveal, so no scroll is spent on a
+      // held turquoise screen.
+      const play = Math.max(1, rect.height - stageHeight - span)
+      const scrolled = -rect.top
+      const target = clamp01(scrolled / play)
+      const revealTarget = clamp01((scrolled - play) / span)
 
       if (!started) {
         started = true
         progress = target
       } else {
-        // Short, settling ease: it tracks wheel steps closely and stops dead
-        // once the scroll stops, without letting the clip drift on its own.
+        // Short, settling ease on the clip only: it tracks wheel steps closely
+        // and stops dead once the scroll stops.
         const diff = target - progress
-        progress = Math.abs(diff) < 0.002 ? target : progress + diff * 0.42
+        progress = Math.abs(diff) < 0.002 ? target : progress + diff * 0.55
       }
 
-      paint(progress)
+      reveal = revealTarget
+      paintMedia(progress)
+      paintReveal(reveal)
       if (progress !== target) raf = requestAnimationFrame(tick)
     }
 
@@ -298,15 +351,15 @@ export function Hero() {
   }
 
   return (
-    <section ref={trackRef} className="relative h-[300svh] lg:h-[430svh]" data-hero-track>
+    <section ref={trackRef} className="relative z-20 h-[300svh] lg:h-[430svh]" data-hero-track>
       {/* Sticky stage: the media layer covers it edge to edge, with no inset,
           padding or radius, so the image and the clip fill the same box. */}
       <div
         ref={stageRef}
         data-hero-stage
-        className="sticky top-0 h-[100dvh] w-full overflow-hidden bg-cream"
+        className="sticky top-0 h-[100dvh] w-full overflow-hidden"
       >
-        <div data-hero-media className="absolute inset-0 overflow-hidden">
+        <div data-hero-media ref={mediaRef} className="absolute inset-0 overflow-hidden bg-cream">
           <canvas ref={canvasRef} aria-hidden="true" className="absolute inset-0 block h-full w-full" />
 
           {/* First frame as poster: a valid image is visible before any frame decodes. */}
@@ -317,19 +370,28 @@ export function Hero() {
             aria-hidden="true"
             className="absolute inset-0 block h-full w-full object-cover object-center transition-opacity duration-300"
           />
-        </div>
 
-        {/* Seals the hand-off between the clip's final paint frame and the curtain. */}
-        <div
-          ref={veilRef}
-          aria-hidden="true"
-          data-hero-veil
-          className="pointer-events-none absolute inset-0 opacity-0"
-          style={{ backgroundColor: PAINT_COLOR }}
-        />
+          {/* Seals the hand-off between the clip's final paint frame and the paint mass. */}
+          <div
+            ref={veilRef}
+            aria-hidden="true"
+            data-hero-veil
+            className="pointer-events-none absolute inset-0 opacity-0"
+            style={{ backgroundColor: PAINT_COLOR }}
+          />
+        </div>
 
         <div ref={copyRef} data-hero-copy className="absolute inset-0 z-10 will-change-[opacity,transform]">
           <HeroOverlay />
+        </div>
+
+        {/* Paint mass attached to the top with a dripping lower edge; it is the
+            same layer the section below is uncovered through. */}
+        <div ref={curtainRef} aria-hidden="true" data-hero-curtain className="pointer-events-none absolute inset-0 z-30">
+          <svg ref={svgRef} className="block h-full w-full">
+            <path ref={massRef} fill={PAINT_COLOR} />
+            <path ref={dripRef} fill={PAINT_COLOR} />
+          </svg>
         </div>
       </div>
     </section>
